@@ -194,9 +194,7 @@ class ChainedTranslationManager
         // Fixes a bug where some translations arent being loaded
         $baseTranslations = collect($this->loadBaseTranslations()[$locale][$group]);
         $translations = $baseTranslations->replaceRecursive($translations)->toArray();
-
-        $this->files->put($groupPath,VarExporter::export($translations));
-        //$this->files->put($groupPath, "<?php\n\nreturn ".var_export($translations, true).';'.\PHP_EOL);
+        $this->files->put($groupPath, "<?php\n\nreturn ".VarExporter::export($translations).';'.\PHP_EOL);
     }
 
     private function getGroupPath(string $locale, string $group, string $languagePath=null): string
