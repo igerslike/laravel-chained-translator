@@ -9,6 +9,8 @@ use Illuminate\Support\Facades\App;
 use RecursiveArrayIterator;
 use RecursiveIteratorIterator;
 use Symfony\Component\Finder\SplFileInfo;
+use Brick\VarExporter\VarExporter;
+use File;
 
 class ChainedTranslationManager
 {
@@ -188,7 +190,13 @@ class ChainedTranslationManager
 
         $groupPath = $this->getGroupPath($locale, $group, $languagePath);
 
-        $this->files->put($groupPath, "<?php\n\nreturn ".var_export($translations, true).';'.\PHP_EOL);
+        // Merge the changed translations with the defaults so we always keep a updated version of everything
+        // Fixes a bug where some translations arent being loaded
+        $baseTranslations = collect($this->loadBaseTranslations()[$locale][$group]);
+        $translations = $baseTranslations->replaceRecursive($translations)->toArray();
+
+        $this->files->put($groupPath,VarExporter::export($translations));
+        //$this->files->put($groupPath, "<?php\n\nreturn ".var_export($translations, true).';'.\PHP_EOL);
     }
 
     private function getGroupPath(string $locale, string $group, string $languagePath=null): string
@@ -226,5 +234,45 @@ class ChainedTranslationManager
         if(!$this->files->exists($path)){
             $this->files->makeDirectory($path,  0755, true);
         }
+    }
+
+    private function loadBaseTranslations(){
+        $translations = collect(File::directories(resource_path('lang')))->mapWithKeys(function ($dir) {
+            return [
+                basename($dir) => collect($this->getBaseTranslationsFiles($dir))->flatMap(function ($file) {
+                    $name = str_replace(['.php', '.js'], '', $file->getBaseName());
+                    if (in_array($name, [], true)) {
+                        return [];
+                    }
+                    $keys = include $file->getPathname() ?? [];
+                    return [
+                        $file->getBasename('.php') => empty($keys) ? [] : $keys,
+                    ];
+                }),
+            ];
+        });
+
+        $packageTranslations = collect([]);
+
+        return $translations
+            ->keys()
+            ->merge($packageTranslations->keys())
+            ->unique()
+            ->values()
+            ->mapWithKeys(static function ($locale) use ($translations, $packageTranslations) {
+                return [
+                    $locale => $translations->has($locale)
+                        ? $translations->get($locale)->merge($packageTranslations->get($locale))
+                        : $packageTranslations->get($locale)->merge($translations->get(config('app.fallback_locale'))),
+                ];
+            });
+    }
+
+    protected function getBaseTranslationsFiles(string $dir)
+    {
+        if (is_dir($dir)) {
+            return File::files($dir);
+        }
+        return [];
     }
 }
